@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from typing import Optional
 import math
 from einops import rearrange
+from math_utils import get_2d_sincos_pos_embed
 
 class TimestepEmbedder(nn.Module):
     """
@@ -27,9 +28,9 @@ class TimestepEmbedder(nn.Module):
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             with torch.no_grad():
-                nn.init.xavier_uniform_(m.weight, std=0.02)
+                nn.init.normal_(m.weight, std=0.02)
                 if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)  
+                    nn.init.constant_(m.bias, 0)
         
     def forward(self, t:torch.Tensor) -> torch.Tensor:
         embedding = self.timestep_embedding(t)
@@ -108,6 +109,12 @@ class PatchEmbed(nn.Module):
                 nn.init.constant_(self.conv_layer.bias, 0)
 
     def forward(self, x: torch.Tensor):
+        """
+        input:
+            x: [B, C, H, W]
+        output:
+            [B, D, H_p, W_p] -> [B, N, D]
+        """
         x = self.conv_layer(x)
         x = rearrange(x, 'b c h w -> b (h w) c')
         return x
@@ -146,8 +153,8 @@ class MlpBlock(nn.Module):
     def forward(self, input):
         return self.mlp(input)
     
-def modulate(x, shift, scale):
-    return x * (1 + scale[:, None]) + shift[:, None]
+def modulate(x, shift: torch.Tensor, scale: torch.Tensor):
+    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 ################################################################################
 #                                 Core DiT Model                               #
@@ -187,7 +194,7 @@ class DiTBlock(nn.Module):
         
         self.mlp_layer = MlpBlock(
             in_dim=self.hidden_size,
-            mlp_dim=self.hidden_size*self.mlp_ratio,
+            mlp_dim=int(self.hidden_size*self.mlp_ratio),
             out_dim=self.hidden_size,
             dropout_rate=self.dropout_rate      
         )
@@ -204,7 +211,7 @@ class DiTBlock(nn.Module):
     def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
         # adaLn forward
         c = self.adaLn_layer(c)
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = c.chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = c.chunk(6, dim=-1)
         
         # multi-head attention
         x_norm = self.norm1(x)
@@ -234,11 +241,147 @@ class DiTBlock(nn.Module):
         mlp_x = self.mlp_layer(x_modulated)
         x = x + gate_mlp.unsqueeze(1) * mlp_x
         
+        return x
+        
+class FinalLayer(nn.Module):
+    """
+    The final layer of DiT.
+    """
+    def __init__(self, patch_size: int, out_channels: int, hidden_size: int):
+        super().__init__()
+        self.patch_size = patch_size
+        self.out_channels = out_channels
+        self.hidden_size = hidden_size
+        
+        self.mlp = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(self.hidden_size, 2 * self.hidden_size)
+        )
+        self.norm = nn.LayerNorm(
+            normalized_shape=self.hidden_size,
+            eps=1e-6, 
+            elementwise_affine=False
+        )
+        self.proj = nn.Linear(
+            self.hidden_size,
+            self.patch_size * self.patch_size * self.out_channels,
+        )
+        
+        self.apply(self._init_weights)
 
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            with torch.no_grad():
+                nn.init.constant_(m.weight, 0)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)  
         
+    def forward(self, x: torch.Tensor, c: torch.Tensor):
+        c = self.mlp(c)
+        shift, scale = c.chunk(2, dim=-1)
         
+        x = self.norm(x)
+        x = modulate(x, shift, scale)
+        x = self.proj(x)
+        return x
         
+class DiT(nn.Module):
+    """
+    Diffusion model with a Transformer backbone.
+    Accept and return Pytorch style image vectors [B, C, H, W].
+    """
+    def __init__(self, 
+                 patch_size: int, 
+                 hidden_size: int, 
+                 in_channels: int,
+                 num_classes: int,
+                 num_heads: int,
+                 mlp_ratio: int,
+                 dropout_rate: int,
+                 dit_depth: int,
+                 out_channels: int,
+                 ignore_dt: bool = False, 
+                ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.hidden_size = hidden_size
+        self.ignore_dt = ignore_dt
+        self.in_channels = in_channels
+        self.num_classes = num_classes
+        self.num_heads = num_heads
+        self.mlp_ratio = mlp_ratio
+        self.dropout_rate = dropout_rate
+        self.dit_depth = dit_depth
+        self.out_channels = out_channels
         
+        self.patch_embed_layer = PatchEmbed(
+            self.patch_size,
+            in_chans=self.in_channels,
+            embed_dim=self.hidden_size,
+        )
+        self.time_embed_layer1 = TimestepEmbedder(
+            hidden_size=self.hidden_size,
+        )
+        self.time_embed_layer2 = TimestepEmbedder(
+            hidden_size=self.hidden_size,
+        )
+        self.label_embed_layer = LabelEmbedder(
+            num_classes=self.num_classes,
+            hidden_size=self.hidden_size
+        )
+        self.dit_blocks = nn.ModuleList([
+            DiTBlock(self.hidden_size, self.num_heads, self.mlp_ratio, self.dropout_rate)
+            for _ in range(self.dit_depth)
+        ])
+        self.final_layer = FinalLayer(
+            self.patch_size,
+            out_channels=self.out_channels,
+            hidden_size=self.hidden_size
+        )
+        
+    def forward(self, x: torch.Tensor, t, dt, y):
+        """
+        Args:
+            x = (Batch, Channels, Height, Width) image, x have to be squares
+            t = (B,) timesteps, 
+            y = (B,) class labels
+        """
+        
+        batch_size = x.shape[0]
+        input_size = x.shape[2]
+        
+        num_patches = (input_size // self.patch_size) ** 2
+        num_patches_side = input_size // self.patch_size
+
+        if self.ignore_dt:
+            dt = torch.zeros_like(t)
+        
+        # x (pos_embed & patch_embed)
+        pos_embed = get_2d_sincos_pos_embed(None, self.hidden_size, num_patches).to(x.device) # pos_embed: [1, N=num_patches, D=hidden_size]
+        x = self.patch_embed_layer(x)
+        x = x + pos_embed # x: [B, N=num_patches, D=hidden_size]
+        
+        # c (timestep_embed & label_embed)
+        ## convert {t, dt, y} into condition `c`
+        t_embed = self.time_embed_layer1(t)
+        dt_embed = self.time_embed_layer2(dt)
+        y_embed = self.label_embed_layer(y)
+        c = t_embed + dt_embed + y_embed # c: [B, D=hidden_size]
+        
+        # {x, c} -> x (dit blocks + final layer)
+        for i, dit_block in enumerate(self.dit_blocks):
+            x = dit_block(x, c)
+        x = self.final_layer(x, c) # x [B, N, patch_size * patch_size * out_channels]
+        
+        # reshape x to images [Batch, Height, Width, out_channels]
+        x = torch.reshape(x, 
+                          (batch_size, num_patches_side, num_patches_side, self.patch_size, self.patch_size, self.out_channels)
+                          )
+        x = torch.einsum('bhwpqc->bhpwqc', x)
+        x = rearrange(x, 'B H P W Q C -> B C (H P) (W Q)', H=int(num_patches_side), W=int(num_patches_side))
+        assert x.shape == (batch_size, self.out_channels, input_size, input_size)
+        
+        return x
         
         
         

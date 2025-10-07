@@ -1,10 +1,12 @@
+# core shortcut DiT model
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 import math
 from einops import rearrange
-from math_utils import get_2d_sincos_pos_embed
+from utils.math_utils import get_2d_sincos_pos_embed
 
 class TimestepEmbedder(nn.Module):
     """

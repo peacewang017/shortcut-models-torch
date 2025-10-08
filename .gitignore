@@ -1,0 +1,10 @@
+*.pt
+*.pth
+*.ckpt
+pycache/
+*.pyc
+venv/
+.venv/
+.ipynb_checkpoints/
+.DS_Store
+/data/

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from typing import Optional
 import math
 from einops import rearrange
-from utils.math_utils import get_2d_sincos_pos_embed
+from utils.math import get_2d_sincos_pos_embed
 
 class TimestepEmbedder(nn.Module):
     """
@@ -385,6 +385,3 @@ class DiT(nn.Module):
         
         return x
         
-        
-        
-    

@@ -10,7 +10,7 @@ import jax
 import flax.linen as nn
 from einops import rearrange, repeat
 
-import utils.math_utils as math_utils
+import utils.math as math
 
 def modulate(x, shift, scale):
     scale = jnp.clip(scale, -1, 1)
@@ -90,7 +90,7 @@ def test_modulate():
     run_and_compare(
         "modulate",
         modulate,
-        math_utils.modulate,
+        math.modulate,
         (x, shift, scale)
     )
 
@@ -101,7 +101,7 @@ def test_1d_pos_embed():
     run_and_compare(
         "1D Positional Embedding",
         get_1d_sincos_pos_embed,
-        math_utils.get_1d_sincos_pos_embed,
+        math.get_1d_sincos_pos_embed,
         (EMBED_DIM, LENGTH)
     )
 
@@ -111,7 +111,7 @@ def test_2d_pos_embed():
     jax_out_1, torch_out_1 = run_and_compare(
         "2D Positional Embedding (768, 16x16)",
         get_2d_sincos_pos_embed,
-        math_utils.get_2d_sincos_pos_embed,
+        math.get_2d_sincos_pos_embed,
         (None, EMBED_DIM_1, LENGTH_1)
     )
     
@@ -134,7 +134,7 @@ def test_2d_pos_embed():
     run_and_compare(
         "2D Positional Embedding (512, 8x8)",
         get_2d_sincos_pos_embed,
-        math_utils.get_2d_sincos_pos_embed,
+        math.get_2d_sincos_pos_embed,
         (None, EMBED_DIM_2, LENGTH_2)
     )
 

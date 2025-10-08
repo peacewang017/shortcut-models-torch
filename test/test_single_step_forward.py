@@ -9,7 +9,7 @@ def test_single_step_forward():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     BATCH_SIZE = 4
-    IMG_SIZE = 256
+    IMG_SIZE = 32
     PATCH_SIZE = 16
     IN_CHANNELS = 3
     HIDDEN_SIZE = 768

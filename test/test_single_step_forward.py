@@ -8,14 +8,14 @@ from model import DiT
 def test_single_step_forward():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    BATCH_SIZE = 4
+    BATCH_SIZE = 1
     IMG_SIZE = 32
     PATCH_SIZE = 16
-    IN_CHANNELS = 3
-    HIDDEN_SIZE = 768
+    IN_CHANNELS = 4
+    HIDDEN_SIZE = 120
     NUM_HEADS = 12
     DIT_DEPTH = 12
-    NUM_CLASSES = 1000
+    NUM_CLASSES = 2
     MLP_RATIO = 4.0
     DROPOUT_RATE = 0.0
     OUT_CHANNELS = IN_CHANNELS

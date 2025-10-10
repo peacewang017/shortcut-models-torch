@@ -111,6 +111,7 @@ def get_dataloader(
     2. "image" col -> "latent" col
     3. lazy load
     """
+    os.makedirs(base_save_path, exist_ok=True)
     save_path = os.path.join(base_save_path, dataset_name.replace("/", "_"))
     
     # lazy load

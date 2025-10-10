@@ -14,26 +14,32 @@ from utils.dataset import get_dataloader
 import torch.optim
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-TOTAL_DENOISING_STEPS = 128
-M_INV = 1 / TOTAL_DENOISING_STEPS
+
+# training config
+DATASET_NAME = 'korexyz/celeba-hq-256x256'
+DATASET_BASE_SAVE_PATH = "/home/jasonluo/code/shortcut-models-torch/data"
+CKPT_BASE_SAVE_PATH = "/home/jasonluo/code/shortcut-models-torch/ckpt"
+TOTAL_DENOISING_STEPS = 128 # 128
+BATCH_SIZE = 32 # 16
 BATCH_SPLIT_RATIO = 0.75 # in every batch, split FM : SC = 0.75 : 0.25
 EMA_DECAY = 0.999
+LEARNING_RATE = 1e-4 # 1e-4
+TRAIN_STEPS = 100000
+WEIGHT_DECAY = 0.1
+
+# data preprocess config
 PATCH_SIZE = 2
-HIDDEN_SIZE = 768
-DIT_DEPTH = 12
+IMAGE_SIZE = 256
+
+# model config
+HIDDEN_SIZE = 768 # 768 must be num_head*n
+DIT_DEPTH = 12 # 12
+NUM_HEADS = 12
+DROPOUT_RATE = 0.1
+MLP_RATIO = 4
 IN_CHANNELS = 4
 OUT_CHANNELS = 4
 NUM_CLASSES = 2
-NUM_HEADS = 12
-MLP_RATIO = 4
-DROPOUT_RATE = 0.1
-LEARNING_RATE = 1e-4
-WEIGHT_DECAY = 0.1
-TRAIN_STEPS = 10000
-DATASET_NAME = 'korexyz/celeba-hq-256x256'
-BATCH_SIZE = 16
-IMAGE_SIZE = 256
-DATASET_BASE_SAVE_PATH = "/mnt"
 
 def update_ema(target_model, source_model, decay):
     """
@@ -85,7 +91,6 @@ def train_step(
     loss_metrics = {'fm_loss': fm_loss.item()}
     
     # SC loss
-    
     ## sampling
     sc_xt, sc_t, sc_y = xt[fm_batch_num:], t[fm_batch_num:], labels[fm_batch_num:].to(DEVICE)
     ## use binary recursive to sample dt, dt must be `2^k` times of `1/m_inv`
@@ -121,6 +126,8 @@ def train_step(
     return loss_metrics
 
 def train():
+    os.makedirs(CKPT_BASE_SAVE_PATH, exist_ok=True)
+    
     model = DiT(
         patch_size=PATCH_SIZE,
         hidden_size=HIDDEN_SIZE,
@@ -196,9 +203,13 @@ def train():
         })
         
         if (step + 1) % 1000 == 0:
-            print(f"\nStep {step + 1}: Saving checkpoint...")
-            torch.save(model.state_dict(), f"shortcut_model_step_{step+1}.pt")
-            torch.save(ema_model.state_dict(), f"shortcut_ema_model_step_{step+1}.pt")
+            print(f"\nStep {step + 1}: Saving checkpoint to '{CKPT_BASE_SAVE_PATH}'...")
+            
+            model_path = os.path.join(CKPT_BASE_SAVE_PATH, f"shortcut_model_step_{step+1}.pt")
+            ema_model_path = os.path.join(CKPT_BASE_SAVE_PATH, f"shortcut_ema_model_step_{step+1}.pt")
+            
+            torch.save(model.state_dict(), model_path)
+            torch.save(ema_model.state_dict(), ema_model_path)
         
     print("Training finished.")
 

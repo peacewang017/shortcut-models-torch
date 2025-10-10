@@ -61,7 +61,7 @@ def run_and_compare(
     jax_func,
     torch_func,
     args,
-    atol=1e-7 # 使用更严格的容忍度
+    atol=1e-7
 ):
     print(f"--- Running Test: {test_name} ---")
     
@@ -96,7 +96,7 @@ def test_modulate():
 
 def test_1d_pos_embed():
     EMBED_DIM = 128
-    LENGTH = 50 # 非完全平方数
+    LENGTH = 50
     
     run_and_compare(
         "1D Positional Embedding",
